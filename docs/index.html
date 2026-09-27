@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Which Pages Should We Refresh First? — Ranking Content-Refresh Priorities on Real Search Data</title>
+<style>
+  :root { --ink:#1a2332; --mut:#5b6577; --acc:#1f6feb; --ok:#1a7f37; --warn:#9a6700; --line:#e3e8ef; --bg:#f7f8fa; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+         color:var(--ink); background:#fff; line-height:1.65; }
+  main { max-width:760px; margin:0 auto; padding:48px 24px 80px; }
+  h1 { font-size:1.9rem; line-height:1.25; margin:0 0 8px; }
+  h2 { font-size:1.25rem; margin:48px 0 12px; padding-top:20px; border-top:1px solid var(--line); }
+  h3 { font-size:1.05rem; margin:28px 0 8px; }
+  p  { margin:12px 0; }
+  .sub { color:var(--mut); font-size:1rem; margin-bottom:28px; }
+  .abstract { background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:18px 22px; }
+  .abstract p { margin:8px 0; }
+  table { border-collapse:collapse; width:100%; margin:16px 0; font-size:.95rem; }
+  th, td { border:1px solid var(--line); padding:8px 12px; text-align:right; }
+  th:first-child, td:first-child { text-align:left; }
+  th { background:var(--bg); }
+  .tag { display:inline-block; font-size:.78rem; font-weight:600; padding:2px 10px; border-radius:999px; vertical-align:middle; }
+  .tag.ok   { color:var(--ok);   background:#e6f4ea; }
+  .tag.warn { color:var(--warn); background:#fff4d6; }
+  img { max-width:100%; border:1px solid var(--line); border-radius:8px; margin:12px 0; }
+  code { background:var(--bg); padding:1px 5px; border-radius:4px; font-size:.9em; }
+  ul { padding-left:22px; } li { margin:6px 0; }
+  footer { margin-top:56px; padding-top:20px; border-top:1px solid var(--line); color:var(--mut); font-size:.9rem; }
+  .placeholder { background:#fff4d6; padding:0 4px; border-radius:3px; font-weight:600; }
+</style>
+<base target="_blank">
+</head>
+<body>
+<main>
+
+<h1>Which Pages Should We Refresh First?</h1>
+<div class="sub">Ranking content-refresh priorities on ~79M rows of real, pseudonymized search-console data.<br>
+A capstone in the FlyRank ML Internship — Refresh / Content Opportunity Scoring lane. Decision-support, not algorithm prophecy.</div>
+
+<div class="abstract">
+<h3 style="margin-top:0">Abstract</h3>
+<p>A content team that can refresh only a small batch of pages per sprint needs a ranked queue, not a label for every row — so the task was framed as ranking, scored by Precision@K against a defined decline proxy.</p>
+<p>Features were built from rolling 30/30/60-day windows of page-day warehouse data, validated with a client-holdout split, and compared against a frozen, human-readable hand rule.</p>
+<p>On the dev client-holdout, gradient boosting reached Precision@50 = 0.90 versus the hand rule's 0.56 (base rate 0.546).</p>
+<p>On one frozen, sealed out-of-time month (June 2026), the same model measured Precision@50 = 0.80 against a base rate of 0.781, and Precision@20 = 0.75 — directionally useful at mid-depth, weaker at the very top than in validation.</p>
+<p>All claims are measured, directional, and decision-support only; the label is a traffic proxy and no causal effect of refreshing is asserted.</p>
+</div>
+
+<h2>1. Introduction — the decision this supports</h2>
+<p>Thousands of pages carry search visibility; a content team can meaningfully refresh only a small batch per sprint. The operational decision is <em>which pages first</em>. Because the team acts on the top of a list, this is a <strong>ranking</strong> problem — a scored classifier underneath, sorted into a queue — evaluated with Precision@K rather than accuracy. The output is a weekly refresh queue a human can read line by line.</p>
+
+<h2>2. Data</h2>
+<ul>
+<li><strong>Release:</strong> FlyRank/internship-warehouse, build v20260703 (gated, pseudonymized; hash keys only). No client names, domains, URLs, or queries appear anywhere in this work.</li>
+<li><strong>Tables:</strong> <code>fact_content_daily_performance</code> (page-day grain; partitions 2025-12 through 2026-06) and the sealed June 2026 outcome window.</li>
+<li><strong>Verification (measured):</strong> the March 2026 partition holds 9,841,378 page-day rows spanning 2026-03-01 → 2026-03-31; 36.7% of rows pass <code>gsc_data_available IS TRUE</code>. The page-day grain was confirmed by a duplicate-key check (zero collisions).</li>
+<li><strong>Frames:</strong> dev — decision date 2026-03-31, 209,493 pages; sealed test — decision date 2026-05-31, 258,233 pages (237,429 with a computable label).</li>
+<li><strong>Excluded by design:</strong> <code>fact_content_query_90d</code> (its fixed 90-day window overlaps any outcome window — a leakage risk), and GA4 engagement columns (mostly unavailable for GSC-only clients; this slice is GSC-only).</li>
+</ul>
+
+<h2>3. Methodology</h2>
+<ul>
+<li><strong>Label (proxy, not ground truth):</strong> a page is <em>declining</em> if its outcome-window impressions (the 30 days after the decision date) fall below its trailing-30-day impressions. Pages absent from the outcome window count as zero impressions — an explicit assumption.</li>
+<li><strong>Features:</strong> ten candidates from rolling windows ending at the decision date — trailing-30d impressions; momentum 30d/90d; mean position 60d; position momentum; CTR 60d; CTR momentum; impression volatility 90d; days seen 90d; presence share. <em>Observed during the run:</em> position and CTR fields were unreported for most pages without clicks and were absent from the training fold entirely; the fitted models therefore relied on the eight traffic-consistency features, with median imputation / NaN-aware boosting handling the gaps.</li>
+<li><strong>Baseline:</strong> a frozen hand rule from earlier work — visibility floor × month-over-month fall — re-scored on this frame's windows for a same-split comparison.</li>
+<li><strong>Validation:</strong> client-holdout split on the dev frame (a client's pages never appear on both sides): 47 clients, 130,513 train / 45,755 holdout rows.</li>
+<li><strong>Leakage controls:</strong> features hard-bounded to <code>report_date ≤ decision date</code> in SQL; model inputs asserted disjoint from outcome columns, and holdout scores verified bit-identical when outcome columns are dropped; the sealed June window was touched exactly once, after the winner was frozen.</li>
+</ul>
+
+<h2>4. Results — model vs baseline, honestly</h2>
+<h3>Dev client-holdout (same rows for every method)</h3>
+<table>
+<tr><th>Method</th><th>Precision@20</th><th>Precision@50</th></tr>
+<tr><td>Base rate (label share)</td><td>0.546</td><td>0.546</td></tr>
+<tr><td>Frozen hand rule</td><td>0.700</td><td>0.560</td></tr>
+<tr><td>Logistic regression</td><td>0.750</td><td>0.860</td></tr>
+<tr><td>Gradient boosting <span class="tag ok">frozen winner</span></td><td><strong>0.950</strong></td><td><strong>0.900</strong></td></tr>
+</table>
+<img src="model_vs_baseline.png" alt="Bar chart: Precision@20 and @50 for base rate, hand rule, logistic regression, gradient boosting on the dev client-holdout.">
+
+<h3>Sealed out-of-time test — June 2026, one frozen run</h3>
+<table>
+<tr><th>Method</th><th>Precision@20</th><th>Precision@50</th><th>Base rate</th></tr>
+<tr><td>Gradient boosting (frozen)</td><td>0.75</td><td>0.80</td><td>0.781</td></tr>
+<tr><td>Frozen hand rule</td><td><span class="placeholder">[RULE_JUNE_P20]</span></td><td><span class="placeholder">[RULE_JUNE_P50]</span></td><td>0.781</td></tr>
+</table>
+<p><strong>Reading (directional, decision-support):</strong> in validation the learned model beat the readable rule decisively at the top of the queue. On the sealed month its Precision@50 stayed modestly above base while Precision@20 did not — a measured out-of-time drop, reported as observed rather than smoothed over. <span class="tag warn">The frozen rule's June numbers are filled in from the notebook's same-split evaluation.</span></p>
+
+<h2>5. Limitations &amp; honest framing</h2>
+<ul>
+<li><strong>One sealed test window (measured):</strong> the June result is a single honest out-of-time measurement on a month whose decline base rate (0.781) differs sharply from dev's (0.546); it is not a performance guarantee.</li>
+<li><strong>Proxy label (defined, not observed truth):</strong> "declining" is a traffic rule, not a business outcome. No causal effect of refreshing is claimed; recovery is not asserted.</li>
+<li><strong>Unbalanced panel (observed):</strong> clients entered the warehouse at different times, so identical windows cover different real history per client; features are directional decision-support, not cross-client absolutes.</li>
+<li><strong>Sparse fields (observed):</strong> position and CTR are largely unreported for pages without clicks, so the models leaned on traffic-consistency signals rather than SERP-appearance signals.</li>
+<li><strong>Small-K noise:</strong> Precision@20/@50 are computed on 20–50 rows; small differences at the top of a ranked list are noisy, and rankings — not labels — are the deliverable.</li>
+</ul>
+
+<h2>6. Ranked recommendations — the action playbook</h2>
+<p>The deliverable is a ranked queue at the current decision date (2026-05-31): every page carries a score, a single human-readable reason code (<code>FALLING_HIGH_VOLUME</code>, <code>FALLING_LOW_VOLUME</code>, <code>NOT_DECLINING_SIGNAL</code>), and an action label (<strong>REFRESH_NOW</strong> / REVIEW / MONITOR). The team works the REFRESH_NOW band first; the queue regenerates from the notebook on every run. Raw row-level output stays out of the public repo by design; the playbook structure and reason codes above are the public, safe summary.</p>
+
+<h2>7. Reproducibility</h2>
+<ul>
+<li>Repo: <a href="https://github.com/ArushRastogi47/10x.ai">github.com/ArushRastogi47/10x.ai</a> — capstone notebook at <code>work/notebooks/capstone.ipynb</code> (Runtime → Run all regenerates everything from the gated warehouse; weekly assignment notebooks document the path here, including the deliberate leakage experiment).</li>
+<li>Receipts committed in-repo: <code>work/outputs/capstone_final_metrics.json</code>, <code>capstone_comparison.json</code>, and the figure above. Raw frames and the recommendations CSV regenerate locally and are not committed (gated-data terms).</li>
+</ul>
+
+<h2>8. Acknowledgments &amp; data credit</h2>
+<p>Built on the <a href="https://flyrank.ai">FlyRank ML Internship dataset</a>. Thanks to the FlyRank internship program for the warehouse release and the weekly curriculum that made this work possible.</p>
+
+<footer>
+Capstone — Refresh / Content Opportunity Scoring · Language discipline: observed / measured / directional / decision-support.
+No claims about Google's ranking algorithm or causal refresh impact are made anywhere in this paper.
+</footer>
+
+</main>
+</body>
+</html>
