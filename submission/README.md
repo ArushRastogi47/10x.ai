@@ -1,6 +1,6 @@
 # submission/
 
-One file lives here: **`https://arushrastogi47.github.io/10x.ai/`**.
+One file lives here: https://arushrastogi47.github.io/10x.ai/.
 
 When your capstone research paper is deployed, replace the placeholder in
 `paper_url.txt` with **exactly one line — the direct URL of your deployed paper**.
